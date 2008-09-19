@@ -2,17 +2,14 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
-using System.Web;
 using System.Web.Mvc;
 using System.Web.Routing;
+using Yaml;
 
-namespace MVCHelpers.Filters
-{
+namespace MVCHelpers.Filters {
     public class Hoptoad : ActionFilterAttribute
     {
         private readonly HoptoadResource resource = new HoptoadResource();
@@ -90,7 +87,7 @@ namespace MVCHelpers.Filters
                 var data = ComposeRequest();
 
                 var req = WebRequest.Create("http://hoptoadapp.com/notices/");
-                req.ContentType = "application/x-www-form-urlencoded";
+                req.ContentType = "application/x-yaml";
                 req.Method = "POST";
                 req.ContentLength = data.Length;
                 var stream = req.GetRequestStream();
@@ -102,31 +99,25 @@ namespace MVCHelpers.Filters
                 res.Close();
             }
 
-            private byte[] ComposeRequest()
-            {
-                var sb = new StringBuilder();
+            private byte[] ComposeRequest() {
+                var req = new Document(new[] {new HashNode("notice", new Mapping {
+                    {"api_key", ApiKey},
+                    {"error_message", ErrorMessage},
+                    {"backtrace", Backtrace},
+                    {"request", FormatHash(Request)},
+                    {"session", FormatHash(Session)},
+                    {"environment", FormatHash(Environment)}
+                })}).ToString();
 
-                sb.AppendLine("api_key=" + HttpUtility.UrlEncode(ApiKey));
-                sb.AppendLine("error_message=" + HttpUtility.UrlEncode(ErrorMessage));
-                foreach (string frame in Backtrace)
-                    sb.AppendLine("backtrace[]=" + HttpUtility.UrlEncode(frame));
-                sb.Append(FormatHash("request", Request));
-                sb.Append(FormatHash("session", Session));
-                sb.Append(FormatHash("environment", Environment));
-
-                return Encoding.UTF8.GetBytes(sb.ToString());
+                return Encoding.UTF8.GetBytes(req);
             }
 
-            private static string FormatHash(string name, IDictionary<string, object> hash, params string[] keys)
+            private static Mapping FormatHash(IDictionary<string, object> hash)
             {
-                string var = keys.Aggregate(new StringBuilder(name),
-                    (sb, k) => sb.AppendFormat("[{0}]", k)).ToString();
-                string ret = hash.Aggregate(new StringBuilder(),
-                    (sb, p) => IsHash(p.Value) ?
-                        sb.Append(FormatHash(name, ToHash(p.Value), keys.Concat(new[] {p.Key}).ToArray())) :
-                        sb.AppendFormat("{0}[{1}]={2}\r\n", var, p.Key, HttpUtility.UrlEncode(p.Value.ToString()))).ToString();
-
-                return (ret.Length != 0 || keys.Length != 0) ? ret : string.Format("{0}=\r\n", var);
+                return hash.Aggregate(new Mapping(), (m, p) =>
+                    IsHash(p.Value) ?
+                        m.Add(p.Key, FormatHash(ToHash(p.Value))) :
+                        m.Add(p.Key, p.Value.ToString()));
             }
 
             private static bool IsHash(object obj)
